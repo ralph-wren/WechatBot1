@@ -40,11 +40,12 @@ const ErrorCode2Message: Record<string, string> = {
   "503":
     "OpenAI 服务器繁忙，请稍后再试| The OpenAI server is busy, please try again later",
   "429":
-    "OpenAI 服务器限流，请稍后再试| The OpenAI server was limted, please try again later",
+    "OpenAI 服务器限流，请稍后再试| The OpenAI server was limited, please try again later",
   "500":
     "OpenAI 服务器繁忙，请稍后再试| The OpenAI server is busy, please try again later",
   unknown: "未知错误，请看日志 | Error unknown, please see the log",
 };
+const Commands = ["/reset", "/help"] as const;
 export class ChatGPTPoole {
   chatGPTPools: Array<IChatGPTItem> | [] = [];
   conversationsPool: Map<string, IConversationItem> = new Map();
@@ -57,7 +58,12 @@ export class ChatGPTPoole {
     const platform = process.platform;
     const { stdout, stderr, exitCode } = await execa(
       platform === "win32" ? "powershell" : "sh",
-      [platform === "win32" ? "/c" : "-c", cmd]
+      [platform === "win32" ? "/c" : "-c", cmd],
+      {
+        env: {
+          https_proxy: config.openAIProxy || process.env.https_proxy,
+        },
+      }
     );
     if (exitCode !== 0) {
       console.error(`${email} login failed: ${stderr}`);
@@ -129,6 +135,9 @@ export class ChatGPTPoole {
       );
     }
   }
+  resetConversation(talkid: string) {
+    this.conversationsPool.delete(talkid);
+  }
   async startPools() {
     const sessionAccounts = config.chatGPTAccountPool.filter(
       isAccountWithSessionToken
@@ -160,6 +169,17 @@ export class ChatGPTPoole {
     }
     console.log(`ChatGPTPools: ${this.chatGPTPools.length}`);
   }
+  async command(cmd: typeof Commands[number], talkid: string): Promise<string> {
+    console.log(`command: ${cmd} talkid: ${talkid}`);
+    if (cmd == "/reset") {
+      this.resetConversation(talkid);
+      return "♻️ 已重置对话 ｜ Conversation reset";
+    }
+    if (cmd == "/help") {
+      return `🧾 支持的命令｜Support command：${Commands.join("，")}`;
+    }
+    return "❓ 未知命令｜Unknow Command";
+  }
   // Randome get chatgpt item form pool
   get chatGPTAPI(): IChatGPTItem {
     return this.chatGPTPools[
@@ -185,6 +205,13 @@ export class ChatGPTPoole {
   }
   // send message with talkid
   async sendMessage(message: string, talkid: string): Promise<string> {
+    if (
+      Commands.some((cmd) => {
+        return message.startsWith(cmd);
+      })
+    ) {
+      return this.command(message as typeof Commands[number], talkid);
+    }
     const conversationItem = this.getConversation(talkid);
     const { conversation, account } = conversationItem;
     try {
